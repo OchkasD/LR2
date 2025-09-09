@@ -1,0 +1,126 @@
+import random
+m = 6
+F.<a> = GF(2^m)
+R.<x> = PolynomialRing(F) 
+alpha = F.gen()
+t = 5
+n = 2^m
+
+if n > 2^m:
+    raise ValueError("n не может превышать 2^m")
+L = list(F)[:n]
+def getGpoly(t, R):
+    return R.irreducible_element(t)
+
+def element_to_bits(el):
+    poly = el.polynomial()
+    bits = [poly[i] for i in range(m)]
+    return bits
+
+def encode(m, G):
+    return m * G
+
+def generateMsg(G):
+    k = G.nrows()
+    # print("k=", k)
+    m = vector(F, [F(random.randint(0, 1)) for _ in range(k)])
+    return m
+
+def generateError(c_bin, t):
+    c_err = list(c_bin)
+    n = len(c_err)
+
+    if t > n:
+        raise ValueError("Число ошибок t не может превышать длину сообщения")
+
+    positions = random.sample([1..n-1], t)
+
+    for pos in positions:
+        c_err[pos] = 1 - c_err[pos]
+
+    return vector(GF(2), c_err)
+    
+def buildH(G, t, n, L):
+    L = [alpha for alpha in F.list() if G(alpha) != 0]
+    H_poly = []
+    for i in range(t):
+        row = [L[j]^i / G(L[j]) for j in range(n)]
+        H_poly.append(row)
+    H_poly = matrix(F, H_poly)
+    
+    H_bin_rows = []
+    for i in range(t):
+        for k in range(m):  
+            row = [element_to_bits(H_poly[i,j])[k] for j in range(n)]
+            H_bin_rows.append(row)
+    H_bin = matrix(GF(2), H_bin_rows)
+    return H_poly, H_bin
+Gp = getGpoly(t,R)
+print("Полином Гоппы: ",Gp)
+Hpoly, Hbin = buildH(Gp, t, n, L)
+G = Hbin.right_kernel().basis_matrix()
+print("Проверочная матрица")
+print(Hbin)
+print("Порождающая матрица")
+print(G)
+print((G*Hbin.T).is_zero())
+def syndrome(v, Gp, t, n):
+    H_, il0vec0des = buildH(Gp, t, n, L)
+    return v * H_.T
+def berlekamp_massey(a):
+    M = len(a) // 2
+    K = a[0].parent().fraction_field()
+
+    R, x = K['x'].objgen()
+    f0, f1 = R(a), x**(2 * M)
+    s0, s1 = 1, 0
+    while f1.degree() >= M:
+        f0, (q, f1) = f1, f0.quo_rem(f1)
+        s0, s1 = s1, s0 - q * s1
+    return s1
+def decoder(v, L, Gp, F):
+    n = len(L)
+    r = Gp.degree()
+    t = r
+
+    syndromes_input = syndrome(v, Gp, t, n)
+    
+    if syndromes_input.is_zero():
+        return v
+
+    syndromes = syndrome(v, Gp^2, 2*t, n)
+    sigma = berlekamp_massey(list(syndromes))
+    print(sigma)
+    error_positions = []
+    
+    for beta in F:
+        if sigma(beta) == 0:
+            loc = beta.inverse() if beta != 0 else 0
+            if loc in L:
+                pos = L.index(loc)
+                error_positions.append(pos)
+
+    if len(error_positions) == 0:
+        return None
+                
+    u = list(v)
+    for pos in error_positions:
+        u[pos] += 1
+
+    result = vector(GF(2), u)
+    if (result * Hbin.transpose()).is_zero():
+        return result
+    else:
+        print("Результат декодирования не принадлежит коду. Количество ошибок в принятом векторе больше количества ошибок, исправляемых кодом.")
+        return None
+message = generateMsg(G)
+C = encode(message, G)
+error = generateError(C, t+1)
+result = decoder(error, L, Gp, F)
+
+print("Отправленное сообщение", message)
+print("Закодированное сообщение", C)
+print("Принятое сообщение с ошибками/ошибкой", error)
+print("Результат декодирования", result)
+print("Результат совпадает с C?", result == C)
+
